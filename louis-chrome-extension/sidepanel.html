@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Louis</title>
+  <link rel="stylesheet" href="sidepanel.css">
+  <script src="libs/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdf.worker.min.js';
+  </script>
+</head>
+<body>
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M8 4v14a2 2 0 002 2h6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <span class="brand-name">Louis</span>
+      <span class="brand-badge">AI</span>
+    </div>
+    <div class="topbar-actions">
+      <div class="status-indicator" id="status-indicator">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-text" id="status-text">Offline</span>
+      </div>
+      <button class="settings-btn" id="settings-btn" title="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Active Tab Info -->
+  <div class="tab-bar" id="tab-bar">
+    <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10A15.3 15.3 0 0112 2z"/>
+    </svg>
+    <span class="tab-title" id="tab-title">New Tab</span>
+  </div>
+
+  <!-- Messages Container -->
+  <div class="chat" id="chat">
+    <!-- Welcome -->
+    <div class="welcome">
+      <div class="welcome-icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+          <path d="M8 4v14a2 2 0 002 2h6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h2 class="welcome-title">What can I help with?</h2>
+      <p class="welcome-sub">I can browse, click, type, and read any web page for you.</p>
+      <div class="quick-actions">
+        <button class="quick-btn" data-prompt="Read this page and give me a summary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          Read page
+        </button>
+        <button class="quick-btn" data-prompt="Go to google.com">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          Navigate
+        </button>
+        <button class="quick-btn" data-prompt="List all the clickable buttons and links on this page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Find elements
+        </button>
+        <button class="quick-btn" data-prompt="Click the first link on this page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/></svg>
+          Click
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Action Status -->
+  <div class="action-bar hidden" id="action-bar">
+    <div class="action-spinner"></div>
+    <span id="action-label">Thinking...</span>
+  </div>
+
+  <!-- Composer -->
+  <div class="composer">
+    <div id="attachment-preview" class="attachment-preview hidden">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+      <span id="attachment-name">document.pdf</span>
+      <button id="attachment-remove" aria-label="Remove attachment">×</button>
+    </div>
+    <div class="composer-box" id="composer-box">
+      <input type="file" id="file-upload" class="hidden" accept=".pdf,.txt,.csv,.md,.json,.png,.jpg,.jpeg,.webp">
+      <button class="composer-action" id="upload-btn" aria-label="Attach File">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+        </svg>
+      </button>
+      <textarea id="input" rows="1" placeholder="Ask Louis anything..." spellcheck="true"></textarea>
+      <button class="composer-send" id="send-btn" disabled aria-label="Send">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button class="composer-stop hidden" id="stop-btn" aria-label="Stop">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="7" y="7" width="10" height="10" rx="1"></rect>
+        </svg>
+      </button>
+    </div>
+    <div class="composer-meta">
+      <span class="meta-status" id="meta-status">Disconnected</span>
+      <span class="meta-hint">↵ Send · ⇧↵ New line</span>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="settings-modal" id="settings-modal">
+    <div class="settings-content">
+      <div class="settings-header">
+        <h3>Standalone API Settings</h3>
+        <button class="close-btn" id="settings-close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <!-- Provider is now automatically selected based on task and available keys -->
+        
+        <label>Fast Model (for simple chat)</label>
+        <input type="text" id="api-fast-model" placeholder="e.g. google/gemma-4-31b-it:free">
+        
+        <label>Smart Model (for tasks/coding)</label>
+        <input type="text" id="api-smart-model" placeholder="e.g. qwen/qwen3-coder:free">
+        
+        <label id="api-base-url-label">Base URL (Ollama/Custom)</label>
+        <input type="text" id="api-base-url" placeholder="e.g. https://ollama.com">
+        
+        <label id="openrouter-keys-label">OpenRouter API Keys (comma-separated)</label>
+        <input type="password" id="openrouter-keys" placeholder="sk-or-v1-...">
+
+        <label id="ollama-keys-label">Ollama API Keys (optional, comma-separated)</label>
+        <input type="password" id="ollama-keys" placeholder="key1,key2,...">
+        
+        <label>Tavily API Key (for Advanced Web Search)</label>
+        <input type="password" id="tavily-api-key" placeholder="tvly-...">
+
+        <label>Google API Key (for Google Custom Search)</label>
+        <input type="password" id="google-api-key" placeholder="AIza...">
+
+        <label>Google CSE ID (cx)</label>
+        <input type="text" id="google-cse-id" placeholder="e.g. 70f84b4a549e647d3">
+      </div>
+      <div class="settings-footer">
+        <button class="save-btn" id="settings-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
