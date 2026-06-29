@@ -101,7 +101,8 @@ OPENROUTER_FALLBACK_CHAINS = {
         "meta-llama/llama-3.3-70b-instruct:free",
     ],
     "vision": [
-        "google/gemini-2.5-pro-vision:free",
+        "google/gemma-4-31b-it:free",
+        "nvidia/nemotron-nano-12b-v2-vl:free",
         "meta-llama/llama-3.2-90b-vision-instruct:free",
     ],
 }
@@ -121,7 +122,8 @@ OPENROUTER_MODEL_CATALOG = [
     ("nvidia/nemotron-3-ultra-550b-a55b:free",    "Nemotron 3 Ultra 550B",  "Best reasoning (free, 1M ctx)"),
     ("nvidia/nemotron-3-super-120b-a12b:free",    "Nemotron 3 Super 120B",  "Reasoning (free, 1M ctx)"),
     ("google/gemma-4-31b-it:free",                "Gemma 4 31B",            "Google, latest gen (free)"),
-    ("google/gemini-2.5-pro-vision:free",         "Gemini 2.5 Pro Vision",  "Google, Multimodal Vision (free)"),
+    ("google/gemma-4-31b-it:free",                "Gemma 4 31B (Vision)",   "Google, Vision capable (free)"),
+    ("nvidia/nemotron-nano-12b-v2-vl:free",        "Nemotron Nano VL",       "NVIDIA, Vision-Language (free)"),
     ("meta-llama/llama-3.3-70b-instruct:free",    "Llama 3.3 70B",         "Meta, general purpose (free)"),
     ("meta-llama/llama-3.2-11b-vision-instruct:free", "Llama 3.2 Vision",   "Meta, Multimodal Vision (free)"),
     ("poolside/laguna-m.1:free",                  "Laguna M.1",             "Coding specialist (free)"),
@@ -330,7 +332,10 @@ def handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
     if tool_name == "read_memory":     return read_memory_tool()
     # Browser tools — these are forwarded to the Chrome extension via WebSocket
     if tool_name in ("browse_to", "new_tab", "click_element", "type_text", "read_page",
-                     "scroll_page", "get_page_elements", "submit_form", "take_screenshot"):
+                     "scroll_page", "get_page_elements", "submit_form", "take_screenshot",
+                     "batch_browser_actions",
+                     "start_notes", "stop_notes", "download_notes",
+                     "start_slide_capture", "stop_slide_capture"):
         return _handle_browser_tool(tool_name, arguments)
     return json.dumps({"status": "error", "message": f"Unknown tool: {tool_name}"})
 
@@ -400,30 +405,52 @@ def _handle_browser_tool(tool_name: str, arguments: dict[str, Any]) -> str:
         return json.dumps({"status": "error", "message": f"Browser tool error: {e}"})
 
 def parse_json_tool(response_text: str) -> dict[str, Any] | None:
-    try:
-        if "```json" in response_text:
-            block = response_text.split("```json")[1].split("```")[0].strip()
-            data  = json.loads(block)
-            if "tool" in data:
-                return data
-        
-        # Fallback: model might output raw JSON without markdown blocks
-        import re
-        match = re.search(r'(\{[\s\S]*"tool"[\s\S]*\})', response_text)
-        if match:
-            data = json.loads(match.group(1))
-            if "tool" in data:
-                return data
-    except Exception:
-        pass
-    return None
+    """Parse the FIRST tool call from a response. Kept for backward compat."""
+    tools = parse_all_json_tools(response_text)
+    return tools[0] if tools else None
+
+
+def parse_all_json_tools(response_text: str) -> list[dict[str, Any]]:
+    """Parse ALL tool calls from a response (handles multiple ```json blocks)."""
+    tools: list[dict[str, Any]] = []
+
+    # Extract all ```json ... ``` blocks
+    if "```json" in response_text:
+        parts = response_text.split("```json")
+        for part in parts[1:]:  # skip text before the first block
+            block = part.split("```")[0].strip()
+            try:
+                data = json.loads(block)
+                if isinstance(data, dict) and "tool" in data:
+                    tools.append(data)
+            except Exception:
+                pass
+
+    # Fallback: model might output raw JSON without markdown blocks
+    if not tools:
+        try:
+            match = re.search(r'(\{[\s\S]*?"tool"[\s\S]*?\})', response_text)
+            if match:
+                data = json.loads(match.group(1))
+                if isinstance(data, dict) and "tool" in data:
+                    tools.append(data)
+        except Exception:
+            pass
+
+    return tools
+
 
 def strip_tool_json(response_text: str) -> str:
+    """Remove ALL ```json tool blocks from a response, keeping surrounding text."""
     if "```json" not in response_text:
         return response_text.strip()
-    before, _, rest = response_text.partition("```json")
-    _, _, after     = rest.partition("```")
-    return (before + after).strip()
+    # Remove every ```json ... ``` block
+    result = response_text
+    while "```json" in result:
+        before, _, rest = result.partition("```json")
+        _, _, after     = rest.partition("```")
+        result = before + after
+    return result.strip()
 
 
 # ── Model picker ──────────────────────────────────────────────────────────────
@@ -1028,21 +1055,24 @@ def role_agent_loop(messages: list[dict], role: str, base_url: str,
         messages.append({"role": "assistant", "content": answer})
         save_session(session)
 
-        tool_call = parse_json_tool(answer)
-        if not tool_call:
+        tool_calls = parse_all_json_tools(answer)
+        if not tool_calls:
             return answer
-
-        tool_name = tool_call.get("tool", "")
-        tool_args = tool_call.get("arguments", {})
 
         lead_text = strip_tool_json(answer)
         if lead_text:
             console.print(Markdown(lead_text))
 
-        print_tool_call(tool_name, tool_args)
-        with thinking_spinner(f"Executing {tool_name}", role=role):
-            tool_output = handle_tool_call(tool_name, tool_args)
-        print_tool_result(tool_name, tool_output)
+        # Execute ALL tool calls from the response sequentially
+        tool_output = ""
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("tool", "")
+            tool_args = tool_call.get("arguments", {})
+
+            print_tool_call(tool_name, tool_args)
+            with thinking_spinner(f"Executing {tool_name}", role=role):
+                tool_output = handle_tool_call(tool_name, tool_args)
+            print_tool_result(tool_name, tool_output)
 
         is_screenshot = (tool_name == "take_screenshot")
         appended = False
@@ -1109,18 +1139,20 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
                 console.print(f"[grey50]> answered via {provider_label}[/grey50]")
             messages.append({"role": "assistant", "content": answer})
             save_session(session)
-            tool_call = parse_json_tool(answer)
-            if not tool_call:
+            tool_calls = parse_all_json_tools(answer)
+            if not tool_calls:
                 return answer
-            tool_name = tool_call.get("tool", "")
-            tool_args = tool_call.get("arguments", {})
             lead_text = strip_tool_json(answer)
             if lead_text:
                 console.print(Markdown(lead_text))
-            print_tool_call(tool_name, tool_args)
-            with thinking_spinner(f"Executing {tool_name}"):
-                tool_output = handle_tool_call(tool_name, tool_args)
-            print_tool_result(tool_name, tool_output)
+            tool_output = ""
+            for tool_call in tool_calls:
+                tool_name = tool_call.get("tool", "")
+                tool_args = tool_call.get("arguments", {})
+                print_tool_call(tool_name, tool_args)
+                with thinking_spinner(f"Executing {tool_name}"):
+                    tool_output = handle_tool_call(tool_name, tool_args)
+                print_tool_result(tool_name, tool_output)
             messages.append({
                 "role": "user",
                 "content": f"TOOL OUTCOME ({tool_name}):\n{tool_output}\n\nContinue or provide final summary.",
