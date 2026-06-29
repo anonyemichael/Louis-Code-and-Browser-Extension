@@ -15,7 +15,6 @@ Louis is a scoped command-line automation assistant paired with a powerful brows
 - [Installation](#installation)
 - [Usage](#usage)
 - [Project Structure](#project-structure)
-- [Screenshots](#screenshots)
 - [Future Roadmap](#future-roadmap)
 - [Contributing](#contributing)
 - [License](#license)
@@ -133,15 +132,6 @@ Louis-Code-and-Browser-Extension/
     └── sidepanel.html          # Extension UI
 ```
 
-## Screenshots
-
-*(Placeholders for future screenshots)*
-
-### Extension UI
-![Extension Side Panel Placeholder](https://via.placeholder.com/600x400?text=Extension+Side+Panel+UI)
-
-### Louis in Action
-![Louis Terminal Output Placeholder](https://via.placeholder.com/800x400?text=Terminal+CLI+Execution)
 
 ## Future Roadmap
 
