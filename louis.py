@@ -64,8 +64,9 @@ def _load_dotenv(path: Path = Path(__file__).resolve().parent / ".env") -> None:
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip().strip("'\"")
-        if key:
-            os.environ[key] = value
+        if key and value:
+            if key not in os.environ:
+                os.environ[key] = value
 
 _load_dotenv()
 
@@ -147,7 +148,7 @@ AGENT_MODELS = {
     "coder":   os.environ.get("CODER_MODEL",   "qwen3-coder:480b"),
     "planner": os.environ.get("PLANNER_MODEL",  "nemotron-3-super"),
     "general": os.environ.get("GENERAL_MODEL",  "gemma4:31b"),
-    "vision":  os.environ.get("VISION_MODEL",   "google/gemini-2.5-pro-vision:free"),
+    "vision":  os.environ.get("VISION_MODEL",   "meta-llama/llama-3.2-11b-vision-instruct:free"),
 }
 
 AGENT_ROLES = {
