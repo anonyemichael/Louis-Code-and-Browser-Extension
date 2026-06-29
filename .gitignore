@@ -1,4 +1,5 @@
 .env
 .louis_sessions/
+.louis-browser-profile/
 __pycache__/
 *.pyc

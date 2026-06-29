@@ -281,6 +281,81 @@ def install_dependencies() -> None:
     subprocess.check_call(python_command() + ["-m", "playwright", "install"])
 
 
+# ── Chrome auto-launch ────────────────────────────────────────────────────────
+
+_CHROME_SEARCH_PATHS = [
+    # Windows standard installs
+    Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    # Edge as fallback (Chromium-based, supports --load-extension)
+    Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+    Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+]
+
+_LOUIS_BROWSER_PROFILE = Path(__file__).resolve().parent / ".louis-browser-profile"
+_EXTENSION_DIR = Path(__file__).resolve().parent / "louis-chrome-extension"
+_chrome_process = None  # Track the launched browser process
+
+
+def _find_chrome() -> str | None:
+    """Find the Chrome (or Edge) executable on this machine."""
+    # Check PATH first
+    import shutil
+    for name in ("chrome", "google-chrome", "chromium-browser", "msedge"):
+        found = shutil.which(name)
+        if found:
+            return found
+    # Check common install paths
+    for path in _CHROME_SEARCH_PATHS:
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def _launch_chrome_with_extension() -> bool:
+    """Launch Chrome with the Louis extension pre-loaded. Returns True on success."""
+    global _chrome_process
+
+    chrome = _find_chrome()
+    if not chrome:
+        console.print("[yellow][!] Could not find Chrome or Edge. Install Chrome to enable auto-launch.[/yellow]")
+        console.print("[grey70]Manual setup: open chrome://extensions → Developer mode → Load unpacked → select louis-chrome-extension/[/grey70]")
+        return False
+
+    if not _EXTENSION_DIR.is_dir():
+        console.print(f"[red][!] Extension directory not found: {_EXTENSION_DIR}[/red]")
+        return False
+
+    # Create the profile directory
+    _LOUIS_BROWSER_PROFILE.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        chrome,
+        f"--load-extension={_EXTENSION_DIR}",
+        f"--user-data-dir={_LOUIS_BROWSER_PROFILE}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--new-window",
+        "https://www.google.com",
+    ]
+
+    try:
+        _chrome_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        browser_name = "Edge" if "edge" in chrome.lower() else "Chrome"
+        console.print(f"[green]✓ {browser_name} launched with Louis extension loaded[/green]")
+        console.print(f"[grey70]  Profile: {_LOUIS_BROWSER_PROFILE}[/grey70]")
+        return True
+    except Exception as e:
+        console.print(f"[red][!] Failed to launch browser: {e}[/red]")
+        return False
+
+
 # ── Core tools ────────────────────────────────────────────────────────────────
 
 def tool_list_directory(path: str) -> str:
@@ -1281,14 +1356,13 @@ def interactive_session(args: argparse.Namespace) -> int:
             preview = cleaned.split("\n")[0][:120] or "(ran a tool)"
             console.print(f"[{style}]{m['role']}:[/{style}] [grey70]{preview}[/grey70]")
         console.print(Rule(style="grey50"))
-    # Auto-start browser server
+    # Auto-start browser server and launch Chrome with extension
     if not browser_server.is_running():
         def _browser_chat_fn(prompt: str) -> str:
             """Process browser messages through Louis AI with role-aware routing."""
             browser_msgs = list(session["messages"])
             browser_msgs.append({"role": "user", "content": prompt})
             try:
-                # Classify task to pick the right model + fallback chain
                 task_type = classify_task(prompt)
                 role_map = {"code": "coder", "plan": "planner", "multi": "coder", "general": "general"}
                 role = role_map.get(task_type, "general")
@@ -1300,6 +1374,7 @@ def interactive_session(args: argparse.Namespace) -> int:
         
         browser_server.start_server(_browser_chat_fn)
         console.print(f"[grey70]Browser server running on ws://localhost:{browser_server.WS_PORT}[/grey70]")
+        _launch_chrome_with_extension()
         console.print()
 
     while True:
@@ -1391,13 +1466,17 @@ def interactive_session(args: argparse.Namespace) -> int:
         if cmd == "/browser":
             if browser_server.is_running():
                 console.print(f"[green]Browser server already running on ws://localhost:{browser_server.WS_PORT}[/green]")
+                # Re-launch Chrome if needed
+                if _chrome_process is None or _chrome_process.poll() is not None:
+                    _launch_chrome_with_extension()
+                else:
+                    console.print("[grey70]Chrome is already open with the Louis extension.[/grey70]")
             else:
                 def _browser_chat_fn(prompt: str) -> str:
                     """Process browser messages through Louis AI with role-aware routing."""
                     browser_msgs = list(session["messages"])
                     browser_msgs.append({"role": "user", "content": prompt})
                     try:
-                        # Classify task to pick the right model + fallback chain
                         task_type = classify_task(prompt)
                         role_map = {"code": "coder", "plan": "planner", "multi": "coder", "general": "general"}
                         role = role_map.get(task_type, "general")
@@ -1408,15 +1487,8 @@ def interactive_session(args: argparse.Namespace) -> int:
                         return f"Error: {e}"
 
                 browser_server.start_server(_browser_chat_fn)
-                console.print(
-                    f"[green]✓ Browser server is running on ws://localhost:{browser_server.WS_PORT}[/green]\n"
-                    f"[grey70]To connect:[/grey70]\n"
-                    f"  1. Open [cyan]chrome://extensions[/cyan] in Chrome\n"
-                    f"  2. Enable [yellow]Developer mode[/yellow] (top right toggle)\n"
-                    f"  3. Click [yellow]Load unpacked[/yellow] → select [cyan]louis-chrome-extension/[/cyan] folder\n"
-                    f"  4. Click the Louis icon in Chrome toolbar → side panel opens\n"
-                    f"  5. Green dot = connected. Chat with Louis from the browser!\n"
-                )
+                console.print(f"[green]✓ Browser server running on ws://localhost:{browser_server.WS_PORT}[/green]")
+                _launch_chrome_with_extension()
             continue
 
         if cmd == "/help":
