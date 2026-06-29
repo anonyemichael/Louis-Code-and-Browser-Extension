@@ -1,0 +1,4 @@
+.env
+.louis_sessions/
+__pycache__/
+*.pyc
