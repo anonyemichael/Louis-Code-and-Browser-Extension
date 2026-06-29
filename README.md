@@ -170,8 +170,7 @@ This project is open-source and available under the MIT License.
 **Anonye Michael Ayinterima**  
 *Computer Engineering Student at UENR*  
 *Software Engineer*  
-*Founder of StayHub Ghana*  
-*Founder & CEO of GI-KACE*
+*Founder of StayHub Ghana*
 
 - **GitHub:** [https://github.com/anonyemichael](https://github.com/anonyemichael)
 - **LinkedIn:** [Insert LinkedIn URL here]
