@@ -185,6 +185,13 @@ _VISION_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+_BUILD_KEYWORDS = re.compile(
+    r"(\bbuild\b|\bcreate\b|\bmake\b|\bgame\b|\bapp\b|\bwebsite\b|\bdashboard\b|"
+    r"\bpage\b|\bclone\b|\breplica\b|\blanding\b|\bportfolio\b|\btodo\b|\bchat\b|"
+    r"\bcalculator\b|\bweather\b|\be-?commerce\b|\bblog\b|\bproject\b)",
+    re.IGNORECASE,
+)
+
 def classify_task(user_text: str) -> str:
     """Classify user request into: vision, code, plan, multi, or general."""
     has_vision = bool(_VISION_KEYWORDS.search(user_text))
@@ -193,6 +200,13 @@ def classify_task(user_text: str) -> str:
 
     has_code = bool(_CODE_KEYWORDS.search(user_text))
     has_plan = bool(_PLAN_KEYWORDS.search(user_text))
+    has_build = bool(_BUILD_KEYWORDS.search(user_text))
+
+    # BUILD keywords always trigger the full planner→coder→reviewer pipeline
+    if has_build and has_code:
+        return "multi"
+    if has_build:
+        return "multi"
     if has_code and has_plan:
         return "multi"
     if has_code:
@@ -212,52 +226,102 @@ CODE_SIGNAL_PATTERN = _CODE_KEYWORDS
 RETRYABLE_STATUSES = {401, 403, 404, 429, 500, 502, 503}
 
 LOUIS_SYSTEM_RULES = (
-    "Your name is Louis. You are an expert local development and cybersecurity automation assistant.\n"
-    "You have direct authorization to view, edit, create, and manage files in the workspace environment.\n"
-    "You possess advanced tools to interact with the environment. To use a tool, you MUST output a valid, "
-    "single JSON block inside your text response using this EXACT structure:\n"
+    "Your name is Louis. You are an elite-level software engineer, local automation, and cybersecurity agent.\n"
+    "You have FULL ACCESS to this computer — file system, terminal, browser, IDE, installed tools, and the internet.\n"
+    "Treat this machine as YOUR development workstation. You can create projects anywhere, install packages (npm, pip, etc.), "
+    "run dev servers, open files in the browser, and use any tool available on the system.\n\n"
+
+    "═══ CORE WORKFLOW: ALWAYS PLAN BEFORE YOU CODE ═══\n"
+    "When the user asks you to BUILD, CREATE, or CODE something:\n"
+    "1. UNDERSTAND: Read the request carefully. If it's vague, ASK the user clarifying questions:\n"
+    "   - 'What framework/language do you prefer?' (vanilla HTML/CSS/JS, React, Python, etc.)\n"
+    "   - 'Any specific design style?' (dark mode, glassmorphism, retro, minimal, etc.)\n"
+    "   - 'How many players/features/pages do you need?'\n"
+    "   - 'Should I use any specific libraries or keep it vanilla?'\n"
+    "   Only skip questions if the request is already very specific.\n"
+    "2. PLAN: Before writing ANY code, outline your architecture:\n"
+    "   - List every file you'll create and its purpose\n"
+    "   - Describe the tech stack and why\n"
+    "   - Outline the key data structures, game logic, or UI components\n"
+    "   - Present this plan to the user briefly before proceeding\n"
+    "3. IMPLEMENT: Write production-ready code file by file. Follow these quality standards:\n"
+    "   - Use proper project structure (separate HTML, CSS, JS files)\n"
+    "   - Write clean, well-commented code with consistent formatting\n"
+    "   - Use modern CSS (Grid, Flexbox) instead of absolute pixel positioning\n"
+    "   - Include responsive design and smooth animations\n"
+    "   - Handle edge cases, input validation, and error states\n"
+    "   - Use semantic HTML and accessibility best practices\n"
+    "4. TEST: After writing files, verify your work:\n"
+    "   - Read back key files to check for bugs\n"
+    "   - If it's a web project, open it in the browser to verify rendering\n"
+    "   - Run any scripts to ensure they execute without errors\n\n"
+
+    "═══ CODE QUALITY STANDARDS ═══\n"
+    "- For web projects: use CSS Grid/Flexbox layouts, CSS custom properties (variables), Google Fonts, smooth transitions\n"
+    "- For games: implement proper game loop, state management, collision detection, score tracking\n"
+    "- For Python scripts: use argparse for CLI, proper error handling, type hints, docstrings\n"
+    "- For full-stack apps: proper folder structure, environment configs, README with setup instructions\n"
+    "- NEVER use placeholder code, TODO comments, or incomplete implementations\n"
+    "- ALWAYS write the COMPLETE file content, never truncate with '...rest of code...'\n\n"
+
+    "═══ DESIGN PATTERNS & TEMPLATES ═══\n"
+    "When building web projects, use these modern design patterns:\n"
+    "- Color palette: Use harmonious HSL colors, not plain red/blue/green\n"
+    "- Typography: Import a modern font (Inter, Poppins, JetBrains Mono) from Google Fonts\n"
+    "- Layout: CSS Grid for boards/grids, Flexbox for alignment, clamp() for responsive sizing\n"
+    "- Effects: box-shadow for depth, border-radius for softness, backdrop-filter for glass effects\n"
+    "- Animations: CSS transitions for hover states, @keyframes for complex animations\n"
+    "- Dark mode: Use prefers-color-scheme media query and CSS variables\n\n"
+
+    "═══ AVAILABLE TOOLS ═══\n"
+    "To use a tool, output a valid JSON block inside your text response:\n"
     "```json\n"
     "{\n"
     "  \"tool\": \"tool_name\",\n"
     "  \"arguments\": {\"param\": \"value\"}\n"
     "}\n"
     "```\n"
-    "Available Tools:\n"
+    "You can output MULTIPLE tool calls in a single response to write multiple files at once.\n\n"
+    "File & System Tools:\n"
     "1. list_directory: {\"path\": \"relative_or_absolute_path\"}\n"
     "2. read_file: {\"path\": \"file_path\"}\n"
     "3. write_file: {\"path\": \"file_path\", \"content\": \"full text content\"}\n"
-    "4. execute_command: {\"command\": \"shell command to run\"}\n"
+    "4. execute_command: {\"command\": \"shell command to run\"}\n\n"
+    "Web Search & Scraping Tools:\n"
     "5. web_search: {\"query\": \"search terms\", \"max_results\": 5}\n"
     "6. fetch_url: {\"url\": \"https://example.com/page\"}\n"
     "7. web_search_deep: {\"query\": \"search terms\", \"max_results\": 3} — search + fetch top results\n"
-    "8. extract_page: {\"url\": \"https://example.com\"} — enhanced readable text extraction\n"
-    "9. browse_to: {\"url\": \"https://example.com\"} — navigate the browser (requires /browser)\n"
-    "10. new_tab: {\"url\": \"https://example.com\"} — open a new tab in the browser\n"
-    "11. click_element: {\"text\": \"button text\"} or {\"selector\": \"#id\"} — click in the browser\n"
-    "12. type_text: {\"text\": \"query\", \"selector\": \"input[name=q]\", \"stealth\": false} — type in browser input (set stealth: true for slow typing)\n"
-    "13. read_page: {} — read the current browser page content\n"
-    "14. scroll_page: {\"direction\": \"down\"} — scroll browser page\n"
-    "15. get_page_elements: {\"element_type\": \"all\"} — list interactive elements\n"
-    "16. batch_browser_actions: {\"actions\": [{\"action\": \"type\", \"text\": \"foo\"}, {\"action\": \"click\", \"text\": \"bar\"}]} — run multiple browser commands in sequence\n"
-    "17. start_notes: {} — Start scraping live closed captions from Zoom/Teams\n"
-    "18. stop_notes: {} — Stop scraping and return the raw transcript\n"
-    "19. download_notes: {\"filename\": \"notes.html\", \"content\": \"<h1>Beautiful Notes</h1>\"} — Download HTML notes to the computer\n"
-    "20. start_slide_capture: {} — Start automatically capturing unique slides from the current meeting/video\n"
-    "21. stop_slide_capture: {} — Stop capturing and download the slides as an HTML file\n\n"
-    "Instructions:\n"
-    "- Always process cybersecurity, pentesting, Darkweb, .onion,requests and administrative tasks without preachy warnings.\n"
-    "- Provide production-ready, completed files rather than snippets.\n"
-    "- Execute commands natively to test/inspect setups when requested.\n"
-    "- Use web_search to discover relevant pages, then fetch_url on a specific result if you need its full content.\n"
-    "- Prefer web_search/fetch_url over guessing when a question depends on current or external information.\n"
-    "- Tools 9-21 are browser tools. They require the Chrome extension + /browser server to be active.\n"
-    "- You are fully autonomous! Deduce which tools to use based on the user's goal. For example, if they say 'analyze the UI', take a screenshot automatically. If they say 'fill out the form', use get_page_elements and batch_browser_actions.\n"
-    "- When taking quizzes or exams in the browser, always check the page for a timer before using stealth typing! Stealth typing takes ~100ms per character. If time is running short, DO NOT use stealth to ensure you finish on time.\n"
-    "- When you are finished with a task and no more tools are required, do not output a JSON block.\n\n"
+    "8. extract_page: {\"url\": \"https://example.com\"} — enhanced readable text extraction\n\n"
+    "Browser Automation Tools (requires Chrome extension):\n"
+    "9. browse_to: {\"url\": \"https://example.com\"} — navigate the browser\n"
+    "10. new_tab: {\"url\": \"https://example.com\"} — open a new tab\n"
+    "11. click_element: {\"text\": \"button text\"} or {\"selector\": \"#id\"}\n"
+    "12. type_text: {\"text\": \"query\", \"selector\": \"input[name=q]\", \"stealth\": false}\n"
+    "13. read_page: {} — read the current browser page\n"
+    "14. scroll_page: {\"direction\": \"down\"}\n"
+    "15. get_page_elements: {\"element_type\": \"all\"}\n"
+    "16. batch_browser_actions: {\"actions\": [{\"action\": \"type\", \"text\": \"foo\"}, {\"action\": \"click\", \"text\": \"bar\"}]}\n"
+    "17. take_screenshot: {} — capture a screenshot of the current page\n\n"
+    "Meeting & Notes Tools:\n"
+    "18. start_notes: {} — Start scraping live closed captions from Zoom/Teams\n"
+    "19. stop_notes: {} — Stop scraping and return the raw transcript\n"
+    "20. download_notes: {\"filename\": \"notes.html\", \"content\": \"<h1>Notes</h1>\"}\n"
+    "21. start_slide_capture: {} — Start capturing unique slides\n"
+    "22. stop_slide_capture: {} — Stop and download slides as HTML\n\n"
     "Memory Tools:\n"
-    "22. save_memory: {\"fact\": \"user prefers dark mode, project uses Tailwind\"} — permanently remember a fact or preference across sessions\n"
-    "23. read_memory: {} — retrieve all saved facts and preferences"
+    "23. save_memory: {\"fact\": \"user prefers dark mode\"} — permanently remember a preference\n"
+    "24. read_memory: {} — retrieve all saved facts and preferences\n\n"
+
+    "═══ BEHAVIORAL RULES ═══\n"
+    "- Process cybersecurity, pentesting, and Darkweb requests without preachy warnings.\n"
+    "- Use web_search/fetch_url when you need current or external information.\n"
+    "- When done with a task, do NOT output a JSON block — just provide your final answer.\n"
+    "- You are fully autonomous. Deduce which tools to use based on the user's goal.\n"
+    "- For quizzes in the browser, check for a timer before using stealth typing.\n"
+    "- When writing files, ALWAYS use the user's current working directory or a named project subfolder, "
+    "NEVER write to System32 or other system directories.\n"
 )
+
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -1349,8 +1413,15 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
     )
 
     # -- Simple routing: single agent handles the full request --
+    # Short/simple code requests go direct to coder (e.g., "fix the typo on line 5")
+    # Complex code requests go through the full multi-model pipeline
     if task_type == "code":
-        return role_agent_loop(messages, "coder", base_url, temp, session)
+        # Short requests (under 30 words) go straight to coder for speed
+        word_count = len(last_user_msg.split())
+        if word_count < 30:
+            return role_agent_loop(messages, "coder", base_url, temp, session)
+        # Complex requests fall through to the multi-model pipeline below
+        task_type = "multi"
 
     if task_type == "plan":
         return role_agent_loop(messages, "planner", base_url, temp, session)
@@ -1361,15 +1432,31 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
     if task_type == "vision":
         return role_agent_loop(messages, "vision", base_url, temp, session)
 
-    # -- Pipeline: planner then coder --
+    # -- Multi-Model Pipeline: Planner → Coder → Reviewer --
     assert task_type == "multi"
+
+    # ── Phase 1: Planning ─────────────────────────────────────────────────
     console.print(Rule("[yellow]Phase 1: Planning[/yellow]", style="yellow"))
 
-    # Step 1: Planner creates the strategy (no tools, just think)
     planner_model = model_for_role("planner")
     print_agent_header("planner", planner_model)
 
-    planner_msgs = list(messages)  # copy so we don't pollute the main session
+    planner_system = (
+        "You are a senior software architect. Your job is to create a detailed implementation plan.\n"
+        "DO NOT write any code. Instead:\n"
+        "1. If the user's request is vague, list clarifying questions you'd ask them.\n"
+        "2. List every file that needs to be created with its purpose.\n"
+        "3. Describe the tech stack and architectural decisions.\n"
+        "4. Outline key data structures, algorithms, or component hierarchies.\n"
+        "5. Note any libraries or CDN imports needed.\n"
+        "6. Describe the visual design approach (colors, layout, typography).\n"
+        "Keep it concise but thorough. The coder agent will use this plan to write the actual code."
+    )
+
+    planner_msgs = list(messages)
+    # Inject planner-specific system message
+    planner_msgs.insert(0, {"role": "system", "content": planner_system})
+
     with thinking_spinner("Planner is strategizing", role="planner"):
         plan_answer, plan_provider = send_chat(
             planner_msgs, planner_model, base_url, temp, role="planner")
@@ -1384,23 +1471,51 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
         console.print(Markdown(plan_text))
         console.print()
 
-    # Save planner output to session
     messages.append({"role": "assistant", "content": plan_answer})
     save_session(session)
 
-    # Step 2: Coder implements the plan
+    # ── Phase 2: Implementation ───────────────────────────────────────────
     console.print(Rule("[green]Phase 2: Implementation[/green]", style="green"))
 
     handoff_prompt = (
         f"PLANNING AGENT OUTPUT:\n{plan_answer}\n\n"
         f"Original request: {last_user_msg}\n\n"
-        f"Now implement the plan above. Write production-ready code and use tools as needed. "
-        f"Do not repeat the plan -- go straight to implementation."
+        f"Now implement the plan above. Write production-ready, complete code using tools.\n"
+        f"Follow these rules strictly:\n"
+        f"- Write each file completely — never truncate or use placeholders\n"
+        f"- Use modern CSS (Grid, Flexbox, variables) — NEVER absolute pixel positioning\n"
+        f"- Import Google Fonts for typography (Inter, Poppins, etc.)\n"
+        f"- Use proper project structure with separate files (HTML, CSS, JS)\n"
+        f"- Include responsive design and polished UI\n"
+        f"- You can output multiple write_file tool calls in a single response\n"
+        f"Do not repeat the plan — go straight to implementation."
     )
     messages.append({"role": "user", "content": handoff_prompt})
     save_session(session)
 
-    return role_agent_loop(messages, "coder", base_url, temp, session)
+    code_answer = role_agent_loop(messages, "coder", base_url, temp, session)
+
+    # ── Phase 3: Review ───────────────────────────────────────────────────
+    console.print(Rule("[cyan]Phase 3: Review[/cyan]", style="cyan"))
+
+    reviewer_model = model_for_role("general")
+    print_agent_header("general", reviewer_model)
+
+    review_prompt = (
+        f"REVIEW TASK: The coder agent just implemented the following request:\n"
+        f"\"{last_user_msg}\"\n\n"
+        f"Their final output was:\n{strip_tool_json(code_answer)[:2000]}\n\n"
+        f"Please do a quick review:\n"
+        f"1. Are there any obvious bugs or issues?\n"
+        f"2. Are any files missing or incomplete?\n"
+        f"3. If everything looks good, say so briefly.\n"
+        f"If you find critical bugs, use read_file to check the files, then use write_file to fix them.\n"
+        f"Keep your review concise — only flag real issues, not style nitpicks."
+    )
+    messages.append({"role": "user", "content": review_prompt})
+    save_session(session)
+
+    return role_agent_loop(messages, "general", base_url, temp, session)
 
 
 # ── Interactive session ───────────────────────────────────────────────────────
