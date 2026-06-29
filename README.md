@@ -1,159 +1,177 @@
-# Louis Agent
+# Louis Code and Browser Extension
 
-Louis is a scoped command-line automation assistant for the current working directory.
-It can run with a headless browser through `browser-use` and an OpenAI-compatible
-cloud model endpoint configured by environment variables.
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![Chrome Extension](https://img.shields.io/badge/extension-Chrome-yellow)
 
-## Files
+Louis is a scoped command-line automation assistant paired with a powerful browser extension. Designed for developers, cybersecurity professionals, and power users, Louis bridges the gap between your local terminal and the web browser. It acts as an AI-driven multi-agent router that can execute coding tasks locally, orchestrate complex web searches, and physically interact with browser pages (clicking, typing, scrolling, and reading) to automate end-to-end workflows from a single unified CLI interface.
 
-- `louis.py` - main CLI script.
-- `web_tools.py` - multi-provider web search (Tavily, DuckDuckGo, Google CSE).
-- `browser_server.py` - WebSocket bridge for the Chrome extension.
-- `louis-chrome-extension/` - Chrome extension for browser automation.
-- `setup_windows.ps1` - PowerShell profile and API-key setup helper.
-- `setup_kali.sh` - Bash setup helper for Kali/Linux.
+## Table of Contents
+- [Key Features](#key-features)
+- [Why Louis Code?](#why-louis-code)
+- [Technologies Used](#technologies-used)
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Screenshots](#screenshots)
+- [Future Roadmap](#future-roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Author](#author)
 
-## Windows PowerShell
+## Key Features
 
+- **Multi-Agent Routing System**: Intelligently routes tasks to specialized LLMs based on intent (e.g., coding, planning, general queries, vision tasks).
+- **Web Browser Automation**: A native Chrome extension allowing Louis to navigate, click, type, read, and screenshot web pages.
+- **Enhanced Web Search**: Fallback-enabled multi-provider search using Tavily, DuckDuckGo, and Google Custom Search.
+- **Provider Fallback & Key Rotation**: Automatically falls back to OpenRouter on API rate limits and cycles through multiple API keys to prevent downtime.
+- **Terminal UI**: Beautiful, rich terminal output with syntax highlighting, live streaming responses, and session history management.
+- **Stealth Browsing**: Built-in evasions (e.g., masking `webdriver` properties) to bypass basic bot-detection during automated tasks.
+- **Cross-Platform Support**: Setup scripts and native support for Windows PowerShell and Kali Linux (Bash).
+
+## Why Louis Code?
+
+Managing AI tools across different tabs, environments, and platforms creates friction. Louis was built to eliminate context switching by bringing a powerful, extensible AI agent directly into your terminal. Unlike standard CLI bots, Louis doesn't stop at answering questions—it can reach out into your active browser, visually inspect web pages, scrape content, and interact with web applications, making it an invaluable tool for automated pentesting, web scraping, and advanced local development.
+
+## Technologies Used
+
+- **Language**: Python 3.8+, JavaScript, HTML/CSS
+- **Libraries/Frameworks**: `rich` (Terminal UI), `playwright`, `browser-use`, `langchain-openai`
+- **APIs**: Ollama (Local/Cloud), OpenRouter, Tavily API, Google Custom Search API
+- **Browser Tech**: Chrome Extensions API (Manifest V3, Service Workers, Content Scripts)
+
+## How It Works
+
+Louis operates via a two-part architecture communicating over WebSockets:
+
+<details>
+<summary><b>1. Python CLI Core (The Brain)</b></summary>
+The main `louis.py` script parses your commands, classifies the intent, and delegates it to the best available LLM. It manages API keys, maintains conversation history, and handles local file manipulations. If a task requires browser interaction, it opens a WebSocket server on `ws://localhost:7865`.
+</details>
+
+<details>
+<summary><b>2. Chrome Extension (The Hands & Eyes)</b></summary>
+<ul>
+  <li><b>Manifest (V3)</b>: Defines permissions (activeTab, scripting, sidePanel) and registers the background worker and content scripts.</li>
+  <li><b>Background Service Worker</b>: Maintains the persistent WebSocket connection with the local Python server and relays commands.</li>
+  <li><b>Side Panel / Popup</b>: Provides a visual interface within Chrome to show connection status and active tasks.</li>
+  <li><b>Content Scripts</b>: Injected into web pages to execute interactions (clicking, typing, scrolling, DOM extraction) and applying stealth modifications.</li>
+</ul>
+</details>
+
+## Installation
+
+### 1. Set Up the CLI Agent
+
+**Windows (PowerShell):**
 ```powershell
-cd "C:\Users\atubt\Documents\Codex\Louis-Agent"
-.\setup_windows.ps1 -OllamaApiKey "your-key"
+git clone https://github.com/anonyemichael/Louis-Code-and-Browser-Extension.git
+cd Louis-Code-and-Browser-Extension
+cp .env.template .env
+# Edit .env and add your API keys
+.\setup_windows.ps1
 louis --install-deps
-louis "inspect this folder and summarize the project"
 ```
 
-If you do not pass the key to the setup script, set it later:
-
-```powershell
-[Environment]::SetEnvironmentVariable("OLLAMA_API_KEY", "your-key", "User")
-```
-
-The setup script appends a function like this to `$PROFILE`. If `python` is not
-on PATH, it uses the bundled Codex Python detected on this machine:
-
-```powershell
-function louis { & "python-or-detected-python.exe" "C:\Users\atubt\Documents\Codex\Louis-Agent\louis.py" @args }
-```
-
-## Kali Linux Bash
-
+**Kali Linux / Debian (Bash):**
 ```bash
-cd ~/Louis-Agent
+git clone https://github.com/anonyemichael/Louis-Code-and-Browser-Extension.git
+cd Louis-Code-and-Browser-Extension
+cp .env.template .env
+# Edit .env and add your API keys
 chmod +x setup_kali.sh
-./setup_kali.sh "your-key"
+./setup_kali.sh
 source ~/.bashrc
 louis --install-deps
-louis "inspect this folder and summarize the project"
 ```
 
-Manual API key setup:
+### 2. Install the Chrome Extension
 
+1. Open Chrome or any Chromium-based browser (Edge, Brave).
+2. Navigate to `chrome://extensions`.
+3. Toggle **Developer Mode** on in the top-right corner.
+4. Click **Load unpacked**.
+5. Select the `louis-chrome-extension` folder inside the cloned repository.
+6. Pin the Louis extension to your browser toolbar for easy access.
+
+## Usage
+
+Start the agent from your terminal in any directory:
 ```bash
-echo 'export OLLAMA_API_KEY="your-key"' >> ~/.bashrc
-source ~/.bashrc
+louis "summarize the code in this directory"
 ```
 
-Manual system link:
-
+To enable browser automation, start the WebSocket server from inside the Louis interface:
 ```bash
-chmod +x louis.py
-sudo ln -sf "$HOME/Louis-Agent/louis" /usr/local/bin/louis
+louis> /browser
+```
+Then interact with the browser directly through natural language:
+```bash
+louis> Go to google.com, search for Python decorators, and click the first result.
+louis> Scroll down and summarize the page.
 ```
 
-## Configuration
+Use `/model` to switch LLM models or `/history` to resume past sessions.
 
-Default model:
+## Project Structure
 
-- `qwen3-coder:30b` for strong free local coding work through Ollama.
-- Use cloud models (e.g. `gpt-4o`, `deepseek-chat`) by pointing the Ollama configuration to an OpenAI-compatible Cloud API.
-
-### Custom Cloud APIs (via the Ollama Provider)
-
-In both the CLI and the Chrome Extension, the **"Ollama"** provider slot is dual-purpose:
-1. **Local Server:** If no API key is provided, it connects to a local Ollama instance (default `http://localhost:11434/api/chat`).
-2. **Cloud APIs:** If you provide an API key and a Base URL (e.g., `https://api.deepseek.com`, `https://open.bigmodel.cn`), Louis dynamically overrides local formatting and routes your requests as standard OpenAI payloads to `${OLLAMA_BASE_URL}/v1/chat/completions`.
-
-Environment variables:
-- `OLLAMA_API_KEYS` - Comma-separated API keys for your Cloud API. Leave empty for local Ollama.
-- `OLLAMA_MODEL` - Your target model (e.g., `qwen3-coder:30b` or `deepseek-chat`).
-- `OLLAMA_BASE_URL` - Cloud API root URL (e.g., `https://api.deepseek.com`) or local `http://localhost:11434`.
-
-Cloud API Example:
-
-```powershell
-[Environment]::SetEnvironmentVariable("OLLAMA_API_KEYS", "sk-your-cloud-key", "User")
-$env:OLLAMA_MODEL = "deepseek-chat"
-$env:OLLAMA_BASE_URL = "https://api.deepseek.com"
-louis "build a small CLI project"
+```text
+Louis-Code-and-Browser-Extension/
+├── louis.py                    # Main CLI entry point and multi-agent router
+├── web_tools.py                # Web search and content extraction utilities
+├── browser_server.py           # WebSocket bridge for Chrome extension
+├── setup_windows.ps1           # Windows environment & profile setup
+├── setup_kali.sh               # Linux environment & profile setup
+├── .env.template               # Template for API keys and configuration
+└── louis-chrome-extension/     # The Chrome Extension source code
+    ├── manifest.json           # Extension Manifest V3
+    ├── background.js           # Service worker handling WebSocket connection
+    ├── content.js              # DOM interaction and scraping logic
+    ├── stealth.js              # Bot-evasion script injected at document_start
+    └── sidepanel.html          # Extension UI
 ```
 
----
+## Screenshots
 
-## Chrome Extension — Louis Web Agent
+*(Placeholders for future screenshots)*
 
-Louis includes a Chrome extension that lets Louis browse the web for you — clicking,
-typing, scrolling, and reading web pages, similar to Claude's or Antigravity's browser
-extension.
+### Extension UI
+![Extension Side Panel Placeholder](https://via.placeholder.com/600x400?text=Extension+Side+Panel+UI)
 
-### Setup
+### Louis in Action
+![Louis Terminal Output Placeholder](https://via.placeholder.com/800x400?text=Terminal+CLI+Execution)
 
-1. **Start Louis** in your terminal:
-   ```
-   louis
-   ```
+## Future Roadmap
 
-2. **Start the browser server** inside the Louis CLI:
-   ```
-   /browser
-   ```
-   This starts a local WebSocket server on `ws://localhost:7865`.
+- **Enhanced DOM Understanding**: Improve content script heuristics to better handle Shadow DOMs and complex React/Vue virtual DOM elements.
+- **Cross-Browser Support**: Expand manifest compatibility to fully support Firefox.
+- **Automated Memory / Context Windowing**: Implement automatic summarization of past conversation history to prevent token exhaustion on long sessions.
+- **Dockerized Environments**: Provide isolated Docker containers for executing generated code safely.
 
-3. **Install the Chrome extension**:
-   - Open `chrome://extensions` in Chrome
-   - Enable **Developer mode** (top right toggle)
-   - Click **Load unpacked** → select the `louis-chrome-extension/` folder
-   - Pin the Louis extension in your toolbar
+## Contributing
 
-4. **Use it**:
-   - Click the Louis icon → the side panel opens
-   - Green dot = connected to Louis CLI
-   - Type commands like:
-     - "Go to google.com and search for Python tutorials"
-     - "Click the first result"
-     - "Read this page and summarize it"
-     - "Fill out the contact form"
-     - "Scroll down"
+Contributions are always welcome! If you'd like to improve Louis:
+1. Fork the repository.
+2. Create a new feature branch (`git checkout -b feature/amazing-feature`).
+3. Commit your changes (`git commit -m 'Add amazing feature'`).
+4. Push to the branch (`git push origin feature/amazing-feature`).
+5. Open a Pull Request.
 
-### Features
+Please ensure your code follows the existing style and all new features are documented.
 
-| Feature | How it works |
-|---------|-------------|
-| **Navigate** | Louis opens URLs in your active tab |
-| **Click** | Finds elements by text, CSS selector, or ARIA label and clicks them |
-| **Type** | Fills in input fields with proper event dispatch (React/Vue compatible) |
-| **Read** | Extracts visible text, links, buttons, and form fields from the page |
-| **Scroll** | Scrolls up/down/to specific elements |
-| **Screenshot** | Captures the visible viewport |
-| **Visual Feedback** | Highlights elements with a cyan border before interacting |
+## License
 
-### Architecture
+This project is open-source and available under the MIT License.
 
-```
-Chrome Extension (Side Panel + Content Script)
-        ↕  WebSocket (ws://localhost:7865)
-Louis CLI (browser_server.py ↔ louis.py ↔ AI models)
-```
+## Author
 
----
+**Anonye Michael Ayinterima**  
+*Computer Engineering Student at UENR*  
+*Software Engineer*  
+*Founder of StayHub Ghana*  
+*Founder & CEO of GI-KACE*
 
-## Enhanced Web Search
-
-Louis now supports multiple search providers with automatic fallback:
-
-1. **Tavily** (primary) — Set `TAVILY_API_KEY` in `.env` for reliable structured results
-2. **DuckDuckGo** (default) — Works without any API key (HTML scraping)
-3. **Google Custom Search** (optional) — Set `GOOGLE_API_KEY` + `GOOGLE_CSE_ID`
-
-New tools available to Louis:
-- `web_search_deep` — Search + fetch and extract content from top results
-- `extract_page` — Enhanced text extraction with readability heuristics
+- **GitHub:** [https://github.com/anonyemichael](https://github.com/anonyemichael)
+- **LinkedIn:** [Insert LinkedIn URL here]
