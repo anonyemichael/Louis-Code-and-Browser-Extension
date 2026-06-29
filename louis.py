@@ -423,9 +423,43 @@ def _launch_chrome_with_extension() -> bool:
 
 # ── Core tools ────────────────────────────────────────────────────────────────
 
+# Directories that should NEVER be written to
+_UNSAFE_DIRS = {
+    "system32", "windows", "program files", "program files (x86)",
+    "programdata", "syswow64", "winsxs",
+}
+
+def _safe_resolve_path(path: str) -> Path:
+    """Resolve a file path safely, redirecting away from system directories."""
+    p = Path(path)
+
+    # If it's already absolute, check if it's in a system directory
+    if p.is_absolute():
+        parts_lower = [part.lower() for part in p.parts]
+        if any(part in _UNSAFE_DIRS for part in parts_lower):
+            # Redirect to Desktop
+            desktop = Path.home() / "Desktop"
+            # Use just the filename or last 2 parts of the path
+            relative_part = Path(*p.parts[-2:]) if len(p.parts) > 2 else Path(p.name)
+            return (desktop / relative_part).resolve()
+        return p.resolve()
+
+    # Relative path: resolve against a safe base directory
+    cwd = Path.cwd()
+    cwd_lower = str(cwd).lower()
+
+    # If CWD is a system directory, use Desktop instead
+    if any(unsafe in cwd_lower for unsafe in _UNSAFE_DIRS):
+        safe_base = Path.home() / "Desktop"
+    else:
+        safe_base = cwd
+
+    return (safe_base / p).resolve()
+
+
 def tool_list_directory(path: str) -> str:
     try:
-        target  = Path(path).resolve()
+        target  = _safe_resolve_path(path)
         entries = [c.name + ("/" if c.is_dir() else "")
                    for c in sorted(target.iterdir(), key=lambda x: x.name.lower())]
         return json.dumps({"status": "success", "directory": str(target), "files": entries})
@@ -434,7 +468,7 @@ def tool_list_directory(path: str) -> str:
 
 def tool_read_file(path: str) -> str:
     try:
-        target = Path(path).resolve()
+        target = _safe_resolve_path(path)
         if not target.is_file():
             return json.dumps({"status": "error", "message": f"{path} is not a valid file"})
         return json.dumps({"status": "success", "path": str(target),
@@ -444,7 +478,7 @@ def tool_read_file(path: str) -> str:
 
 def tool_write_file(path: str, content: str) -> str:
     try:
-        target = Path(path).resolve()
+        target = _safe_resolve_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return json.dumps({"status": "success", "path": str(target), "bytes_written": len(content)})
@@ -453,7 +487,14 @@ def tool_write_file(path: str, content: str) -> str:
 
 def tool_execute_command(command: str) -> str:
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
+        # Run commands from a safe directory, not System32
+        cwd = Path.cwd()
+        if any(unsafe in str(cwd).lower() for unsafe in _UNSAFE_DIRS):
+            safe_cwd = str(Path.home() / "Desktop")
+        else:
+            safe_cwd = str(cwd)
+        result = subprocess.run(command, shell=True, capture_output=True, text=True,
+                                timeout=60, cwd=safe_cwd)
         return json.dumps({"status": "success", "returncode": result.returncode,
                            "stdout": result.stdout, "stderr": result.stderr})
     except Exception as e:
@@ -732,10 +773,24 @@ def read_memory_tool() -> str:
 
 def get_system_rules() -> str:
     base = LOUIS_SYSTEM_RULES
+
+    # Inject the user's safe file paths so the model knows where to write
+    home = Path.home()
+    desktop = home / "Desktop"
+    base += (
+        f"\n═══ YOUR ENVIRONMENT ═══\n"
+        f"- User Home: {home}\n"
+        f"- Desktop: {desktop}\n"
+        f"- Default project location: {desktop} (create a subfolder for each project)\n"
+        f"- OS: {os.name} ({'Windows' if os.name == 'nt' else 'Linux/Mac'})\n"
+        f"- IMPORTANT: Always use ABSOLUTE paths starting with {desktop} for new projects.\n"
+        f"  Example: {desktop / 'LudoGame' / 'index.html'}\n"
+    )
+
     mem = load_memory()
     facts = mem.get("facts", [])
     if facts:
-        base += "\n\nCRITICAL USER PREFERENCES & MEMORY (Follow these strictly):\n"
+        base += "\nCRITICAL USER PREFERENCES & MEMORY (Follow these strictly):\n"
         for i, f in enumerate(facts, 1):
             base += f"{i}. {f}\n"
     return base
@@ -1473,6 +1528,13 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
 
     messages.append({"role": "assistant", "content": plan_answer})
     save_session(session)
+
+    # If the planner asked the user questions, STOP and wait for answers
+    # instead of barreling into Phase 2 with no context
+    question_count = plan_text.count("?") if plan_text else 0
+    if question_count >= 2:
+        console.print("[yellow]Planner has questions for you ↑ — answer them and I'll continue building.[/yellow]")
+        return plan_answer
 
     # ── Phase 2: Implementation ───────────────────────────────────────────
     console.print(Rule("[green]Phase 2: Implementation[/green]", style="green"))
