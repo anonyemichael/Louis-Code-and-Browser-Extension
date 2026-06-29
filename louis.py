@@ -30,6 +30,7 @@ from rich.spinner import Spinner
 from rich.text import Text
 from rich.rule import Rule
 from rich import box
+import threading
 
 import web_tools
 import browser_server
@@ -1083,20 +1084,83 @@ def print_tool_result(tool_name: str, raw_result: str) -> None:
 
 def render_final_answer(answer_text: str) -> None:
     text = strip_tool_json(answer_text)
-    if not text:
+    if not text or text == "(cancelled)":
         return
     console.print()
     console.print(Markdown(text))
     console.print()
 
+# ── Escape key cancellation ───────────────────────────────────────────────────────
+
+_cancel_event = threading.Event()
+_escape_watcher: threading.Thread | None = None
+
+
+def _start_escape_watcher() -> None:
+    """Start a daemon thread that watches for the Escape key."""
+    global _escape_watcher
+    _cancel_event.clear()
+
+    if _escape_watcher and _escape_watcher.is_alive():
+        return  # Already watching
+
+    def _watch():
+        if os.name == "nt":
+            import msvcrt
+            while not _cancel_event.is_set():
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key == b'\x1b':  # Escape key
+                        _cancel_event.set()
+                        return
+                time.sleep(0.05)
+        else:
+            # Unix: use select on stdin
+            import select
+            import termios
+            import tty
+            try:
+                old_settings = termios.tcgetattr(sys.stdin)
+                tty.setcbreak(sys.stdin.fileno())
+                while not _cancel_event.is_set():
+                    if select.select([sys.stdin], [], [], 0.05)[0]:
+                        ch = sys.stdin.read(1)
+                        if ch == '\x1b':  # Escape key
+                            _cancel_event.set()
+                            return
+            except Exception:
+                pass
+            finally:
+                try:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                except Exception:
+                    pass
+
+    _escape_watcher = threading.Thread(target=_watch, daemon=True, name="esc-watcher")
+    _escape_watcher.start()
+
+
+def _stop_escape_watcher() -> None:
+    """Stop the escape key watcher."""
+    global _escape_watcher
+    _cancel_event.set()  # Signal the watcher thread to exit
+    _escape_watcher = None
+
+
+class CancelledByUser(Exception):
+    """Raised when the user presses Escape to cancel."""
+    pass
+
+
 def thinking_spinner(label: str = "Louis is thinking", role: str | None = None):
+    esc_hint = " [grey50](Esc to cancel)[/grey50]"
     if role:
         info  = AGENT_ROLES.get(role, AGENT_ROLES["general"])
         color = info["color"]
         tag   = info["label"]
-        return Live(Spinner("dots", text=f" [{color}][{tag}][/{color}] {label}...", style="cyan"),
+        return Live(Spinner("dots", text=f" [{color}][{tag}][/{color}] {label}...{esc_hint}", style="cyan"),
                     console=console, refresh_per_second=12, transient=True)
-    return Live(Spinner("dots", text=f" {label}...", style="cyan"),
+    return Live(Spinner("dots", text=f" {label}...{esc_hint}", style="cyan"),
                 console=console, refresh_per_second=12, transient=True)
 
 def print_agent_header(role: str, model: str) -> None:
@@ -1116,74 +1180,99 @@ def role_agent_loop(messages: list[dict], role: str, base_url: str,
     """
     Run a single agent (role) with tool execution loop.
     Uses the model assigned to the given role.
+    Press Escape at any time to cancel and return to the prompt.
     """
     model = model_for_role(role)
     print_agent_header(role, model)
 
-    for _ in range(max_loops):
-        with thinking_spinner(f"Louis is thinking", role=role):
-            answer, provider_label = send_chat(messages, model, base_url, temperature, role=role)
+    _start_escape_watcher()
+    try:
+        for _ in range(max_loops):
+            # Check for cancel before each API call
+            if _cancel_event.is_set():
+                raise CancelledByUser()
 
-        if provider_label != model:
-            console.print(f"[grey50]> answered via {provider_label}[/grey50]")
+            with thinking_spinner(f"Louis is thinking", role=role):
+                answer, provider_label = send_chat(messages, model, base_url, temperature, role=role)
 
-        messages.append({"role": "assistant", "content": answer})
+            if _cancel_event.is_set():
+                raise CancelledByUser()
+
+            if provider_label != model:
+                console.print(f"[grey50]> answered via {provider_label}[/grey50]")
+
+            messages.append({"role": "assistant", "content": answer})
+            save_session(session)
+
+            tool_calls = parse_all_json_tools(answer)
+            if not tool_calls:
+                return answer
+
+            lead_text = strip_tool_json(answer)
+            if lead_text:
+                console.print(Markdown(lead_text))
+
+            # Execute ALL tool calls from the response sequentially
+            tool_output = ""
+            cancelled_mid_tools = False
+            for tool_call in tool_calls:
+                if _cancel_event.is_set():
+                    cancelled_mid_tools = True
+                    break
+
+                tool_name = tool_call.get("tool", "")
+                tool_args = tool_call.get("arguments", {})
+
+                print_tool_call(tool_name, tool_args)
+                with thinking_spinner(f"Executing {tool_name}", role=role):
+                    tool_output = handle_tool_call(tool_name, tool_args)
+                print_tool_result(tool_name, tool_output)
+
+            if cancelled_mid_tools:
+                raise CancelledByUser()
+
+            is_screenshot = (tool_name == "take_screenshot")
+            appended = False
+
+            if is_screenshot:
+                try:
+                    out_data = json.loads(tool_output)
+                    if out_data.get("status") == "success" and "data" in out_data and "dataUrl" in out_data["data"]:
+                        b64_url = out_data["data"]["dataUrl"]
+                        
+                        # Check if current model supports vision
+                        if "vision" in model.lower() or "gpt-4o" in model.lower() or "gemini" in model.lower() or "claude-3-5" in model.lower():
+                            messages.append({
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": f"TOOL OUTCOME ({tool_name}): Screenshot captured successfully.\n\nContinue or provide final summary."},
+                                    {"type": "image_url", "image_url": {"url": b64_url}}
+                                ]
+                            })
+                        else:
+                            messages.append({
+                                "role": "user",
+                                "content": f"TOOL OUTCOME ({tool_name}): Screenshot captured, but the current model ({model}) does not support Vision.\nUse /model to switch to a Vision model (e.g., Gemini 2.5 Pro Vision or Llama 3.2 Vision) to see images.\n\nContinue or provide final summary."
+                            })
+                        appended = True
+                except Exception:
+                    pass
+
+            if not appended:
+                messages.append({
+                    "role":    "user",
+                    "content": f"TOOL OUTCOME ({tool_name}):\n{tool_output}\n\nContinue or provide final summary.",
+                })
+            save_session(session)
+
+        return "Error: Tool execution depth exceeded parameters."
+
+    except CancelledByUser:
+        console.print("\n[yellow]⏹ Cancelled by user (Esc)[/yellow]")
         save_session(session)
-
-        tool_calls = parse_all_json_tools(answer)
-        if not tool_calls:
-            return answer
-
-        lead_text = strip_tool_json(answer)
-        if lead_text:
-            console.print(Markdown(lead_text))
-
-        # Execute ALL tool calls from the response sequentially
-        tool_output = ""
-        for tool_call in tool_calls:
-            tool_name = tool_call.get("tool", "")
-            tool_args = tool_call.get("arguments", {})
-
-            print_tool_call(tool_name, tool_args)
-            with thinking_spinner(f"Executing {tool_name}", role=role):
-                tool_output = handle_tool_call(tool_name, tool_args)
-            print_tool_result(tool_name, tool_output)
-
-        is_screenshot = (tool_name == "take_screenshot")
-        appended = False
-
-        if is_screenshot:
-            try:
-                out_data = json.loads(tool_output)
-                if out_data.get("status") == "success" and "data" in out_data and "dataUrl" in out_data["data"]:
-                    b64_url = out_data["data"]["dataUrl"]
-                    
-                    # Check if current model supports vision
-                    if "vision" in model.lower() or "gpt-4o" in model.lower() or "gemini" in model.lower() or "claude-3-5" in model.lower():
-                        messages.append({
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": f"TOOL OUTCOME ({tool_name}): Screenshot captured successfully.\n\nContinue or provide final summary."},
-                                {"type": "image_url", "image_url": {"url": b64_url}}
-                            ]
-                        })
-                    else:
-                        messages.append({
-                            "role": "user",
-                            "content": f"TOOL OUTCOME ({tool_name}): Screenshot captured, but the current model ({model}) does not support Vision.\nUse /model to switch to a Vision model (e.g., Gemini 2.5 Pro Vision or Llama 3.2 Vision) to see images.\n\nContinue or provide final summary."
-                        })
-                    appended = True
-            except Exception:
-                pass
-
-        if not appended:
-            messages.append({
-                "role":    "user",
-                "content": f"TOOL OUTCOME ({tool_name}):\n{tool_output}\n\nContinue or provide final summary.",
-            })
-        save_session(session)
-
-    return "Error: Tool execution depth exceeded parameters."
+        return "(cancelled)"
+    finally:
+        _stop_escape_watcher()
 
 
 def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str:
