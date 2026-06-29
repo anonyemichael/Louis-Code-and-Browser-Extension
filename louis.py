@@ -1584,6 +1584,7 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
         f"1. Are there any obvious bugs or issues?\n"
         f"2. Are any files missing or incomplete?\n"
         f"3. If everything looks good, say so briefly.\n"
+        f"4. IMPORTANT: If an HTML file was created (e.g. index.html), ALWAYS test it out by calling the browse_to tool with its absolute file:// path so the user can see it.\n"
         f"If you find critical bugs, use read_file to check the files, then use write_file to fix them.\n"
         f"Keep your review concise — only flag real issues, not style nitpicks."
     )
@@ -1594,6 +1595,31 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
 
 
 # ── Interactive session ───────────────────────────────────────────────────────
+
+def render_session_chat(messages: list[dict[str, Any]]) -> None:
+    """Render the full chat history of a session, formatting user and assistant messages."""
+    console.print(Rule("Resumed conversation", style="grey50"))
+    for m in messages:
+        if m["role"] == "system":
+            continue
+        if m["content"].startswith("TOOL OUTCOME"):
+            continue
+            
+        role_label = "[bold cyan]User[/bold cyan]" if m["role"] == "user" else "[bold white]Louis[/bold white]"
+        cleaned = strip_tool_json(m["content"]).strip()
+        if "User Command:" in cleaned:
+            cleaned = cleaned.split("User Command:", 1)[-1].strip()
+            
+        if not cleaned:
+            continue
+            
+        console.print(f"{role_label}:")
+        if m["role"] == "user":
+            console.print(f"[cyan]{cleaned}[/cyan]\n")
+        else:
+            console.print(Markdown(cleaned))
+            console.print()
+    console.print(Rule(style="grey50"))
 
 def interactive_session(args: argparse.Namespace) -> int:
     session = new_session(args)
@@ -1623,18 +1649,7 @@ def interactive_session(args: argparse.Namespace) -> int:
     print_banner(args, session)
 
     if len(session["messages"]) > 1:
-        console.print(Rule("Resumed conversation", style="grey50"))
-        candidates = [m for m in session["messages"]
-                      if m["role"] in ("user", "assistant")
-                      and not m["content"].startswith("TOOL OUTCOME")]
-        for m in candidates[-4:]:
-            style   = "cyan" if m["role"] == "user" else "white"
-            cleaned = strip_tool_json(m["content"]).strip()
-            if "User Command:" in cleaned:
-                cleaned = cleaned.split("User Command:", 1)[-1].strip()
-            preview = cleaned.split("\n")[0][:120] or "(ran a tool)"
-            console.print(f"[{style}]{m['role']}:[/{style}] [grey70]{preview}[/grey70]")
-        console.print(Rule(style="grey50"))
+        render_session_chat(session["messages"])
     # Auto-start browser server (but don't launch Chrome — it opens on demand)
     if not browser_server.is_running():
         def _browser_chat_fn(prompt: str) -> str:
@@ -1732,6 +1747,7 @@ def interactive_session(args: argparse.Namespace) -> int:
                 args.model    = session.get("model",    args.model)
                 args.base_url = session.get("base_url", args.base_url)
                 console.print(f"[green]Switched to[/green] [yellow]{session['id']}[/yellow]\n")
+                render_session_chat(session["messages"])
             continue
 
         if cmd == "/save":
