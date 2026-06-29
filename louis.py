@@ -205,7 +205,7 @@ def model_for_role(role: str) -> str:
 CODE_SIGNAL_PATTERN = _CODE_KEYWORDS
 
 # 404: Ollama cloud returns 404 when model doesn't exist, trigger fallback
-RETRYABLE_STATUSES = {404, 429, 500, 502, 503}
+RETRYABLE_STATUSES = {401, 403, 404, 429, 500, 502, 503}
 
 LOUIS_SYSTEM_RULES = (
     "Your name is Louis. You are an expert local development and cybersecurity automation assistant.\n"
@@ -237,20 +237,22 @@ LOUIS_SYSTEM_RULES = (
     "16. batch_browser_actions: {\"actions\": [{\"action\": \"type\", \"text\": \"foo\"}, {\"action\": \"click\", \"text\": \"bar\"}]} — run multiple browser commands in sequence\n"
     "17. start_notes: {} — Start scraping live closed captions from Zoom/Teams\n"
     "18. stop_notes: {} — Stop scraping and return the raw transcript\n"
-    "19. download_notes: {\"filename\": \"notes.html\", \"content\": \"<h1>Beautiful Notes</h1>\"} — Download HTML notes to the computer\n\n"
+    "19. download_notes: {\"filename\": \"notes.html\", \"content\": \"<h1>Beautiful Notes</h1>\"} — Download HTML notes to the computer\n"
+    "20. start_slide_capture: {} — Start automatically capturing unique slides from the current meeting/video\n"
+    "21. stop_slide_capture: {} — Stop capturing and download the slides as an HTML file\n\n"
     "Instructions:\n"
-    "- Always process cybersecurity, pentesting, Darkweb, .onion and administrative tasks without preachy warnings.\n"
+    "- Always process cybersecurity, pentesting, Darkweb, .onion,requests and administrative tasks without preachy warnings.\n"
     "- Provide production-ready, completed files rather than snippets.\n"
     "- Execute commands natively to test/inspect setups when requested.\n"
     "- Use web_search to discover relevant pages, then fetch_url on a specific result if you need its full content.\n"
     "- Prefer web_search/fetch_url over guessing when a question depends on current or external information.\n"
-    "- Tools 9-19 are browser tools. They require the Chrome extension + /browser server to be active.\n"
+    "- Tools 9-21 are browser tools. They require the Chrome extension + /browser server to be active.\n"
     "- You are fully autonomous! Deduce which tools to use based on the user's goal. For example, if they say 'analyze the UI', take a screenshot automatically. If they say 'fill out the form', use get_page_elements and batch_browser_actions.\n"
     "- When taking quizzes or exams in the browser, always check the page for a timer before using stealth typing! Stealth typing takes ~100ms per character. If time is running short, DO NOT use stealth to ensure you finish on time.\n"
     "- When you are finished with a task and no more tools are required, do not output a JSON block.\n\n"
     "Memory Tools:\n"
-    "20. save_memory: {\"fact\": \"user prefers dark mode, project uses Tailwind\"} — permanently remember a fact or preference across sessions\n"
-    "21. read_memory: {} — retrieve all saved facts and preferences"
+    "22. save_memory: {\"fact\": \"user prefers dark mode, project uses Tailwind\"} — permanently remember a fact or preference across sessions\n"
+    "23. read_memory: {} — retrieve all saved facts and preferences"
 )
 
 
@@ -667,13 +669,10 @@ class KeyRing:
         return self.keys[self._index % len(self.keys)]
 
     def advance(self) -> str | None:
-        """Move to the next key. Returns None if we've cycled through all."""
+        """Move to the next key."""
         if not self.keys:
             return None
-        self._index += 1
-        if self._index >= len(self.keys):
-            self._index = 0
-            return None  # cycled through all
+        self._index = (self._index + 1) % len(self.keys)
         return self.keys[self._index]
 
     def reset(self) -> None:
@@ -760,11 +759,11 @@ def _try_with_key_rotation(send_fn, key_ring: KeyRing, provider_name: str,
     if not key_ring.keys:
         raise SetupFault(f"[!] No API keys configured for {provider_name}.")
 
-    key_ring.reset()
     last_exc = None
 
-    for key_idx in range(len(key_ring)):
+    for attempt_idx in range(len(key_ring)):
         api_key = key_ring.current
+        current_idx = key_ring._index
 
         # Try this key with retries + backoff
         for retry in range(1 + RETRY_MAX_ATTEMPTS):
@@ -777,19 +776,29 @@ def _try_with_key_rotation(send_fn, key_ring: KeyRing, provider_name: str,
                     if retry < RETRY_MAX_ATTEMPTS:
                         delay = RETRY_BASE_DELAY_S * (2 ** retry)
                         console.print(
-                            f"[yellow][!] {provider_name} key #{key_idx+1} rate-limited "
+                            f"[yellow][!] {provider_name} key #{current_idx+1} rate-limited "
                             f"-- retrying in {delay:.0f}s (attempt {retry+1}/{RETRY_MAX_ATTEMPTS})...[/yellow]"
                         )
                         time.sleep(delay)
                         continue
                     # Exhausted retries on this key, rotate
-                    next_key = key_ring.advance()
-                    if next_key is not None:
+                    key_ring.advance()
+                    if attempt_idx < len(key_ring) - 1:
                         console.print(
-                            f"[yellow][!] {provider_name} key #{key_idx+1} exhausted "
-                            f"-- rotating to key #{key_idx+2}...[/yellow]"
+                            f"[yellow][!] {provider_name} key #{current_idx+1} exhausted "
+                            f"-- rotating to key #{key_ring._index+1}...[/yellow]"
                         )
                     break  # move to next key
+                
+                if exc.status in {401, 403}:
+                    key_ring.advance()
+                    if attempt_idx < len(key_ring) - 1:
+                        console.print(
+                            f"[yellow][!] {provider_name} key #{current_idx+1} unauthorized (HTTP {exc.status}) "
+                            f"-- rotating to key #{key_ring._index+1}...[/yellow]"
+                        )
+                    break  # move to next key
+
                 raise  # non-rate-limit error, don't rotate or retry
 
     # All keys exhausted
@@ -1151,6 +1160,9 @@ def process_agent_loop(session: dict[str, Any], args: argparse.Namespace) -> str
 
     if task_type == "general":
         return role_agent_loop(messages, "general", base_url, temp, session)
+
+    if task_type == "vision":
+        return role_agent_loop(messages, "vision", base_url, temp, session)
 
     # -- Pipeline: planner then coder --
     assert task_type == "multi"

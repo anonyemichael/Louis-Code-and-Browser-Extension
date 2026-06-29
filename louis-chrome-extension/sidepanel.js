@@ -399,6 +399,20 @@ async function executeBrowserActionLocally(msg) {
       a.click();
       URL.revokeObjectURL(url);
       result = { success: true, data: { downloaded: a.download } };
+    } else if (originalAction === 'start_slide_capture') {
+      if (port) {
+        port.postMessage({ type: 'start_slide_capture' });
+        result = { success: true, data: { status: 'Slide capture started' } };
+      } else {
+        result = { success: false, error: 'Background port disconnected' };
+      }
+    } else if (originalAction === 'stop_slide_capture') {
+      if (port) {
+        port.postMessage({ type: 'stop_slide_capture' });
+        result = { success: true, data: { status: 'Slide capture stopped, check downloads' } };
+      } else {
+        result = { success: false, error: 'Background port disconnected' };
+      }
     } else {
       // Send to content script
       const { action, ...data } = msg;
@@ -854,7 +868,7 @@ async function processStandaloneMessage(text, attachedData = null) {
 
   window.activeKeyIndexes = window.activeKeyIndexes || {};
 
-  async function executeOllamaOrCloudFetch(originalBody, p = standaloneSettings.provider, modelOverride = null, keyIndex = null) {
+  async function executeOllamaOrCloudFetch(originalBody, p = standaloneSettings.provider, modelOverride = null, keyIndex = null, retryAttempt = 0) {
     if (keyIndex === null) {
       keyIndex = window.activeKeyIndexes[p] || 0;
     }
@@ -890,7 +904,7 @@ async function processStandaloneMessage(text, attachedData = null) {
       if (AVAILABLE_PROVIDERS.length > 0) {
         const nextProvider = AVAILABLE_PROVIDERS[0];
         handleMessage({ action: 'action_start', text: `[${p}] No API keys configured. Switching to ${nextProvider}...` });
-        return await executeOllamaOrCloudFetch(originalBody, nextProvider, null, 0);
+        return await executeOllamaOrCloudFetch(originalBody, nextProvider, null, 0, 0);
       }
       throw new Error(`No API keys configured for ${p}`);
     }
@@ -954,6 +968,12 @@ async function processStandaloneMessage(text, attachedData = null) {
     const isModelError = res.status === 400 || res.status === 404 || res.status === 500 || res.status === 502 || res.status === 503;
     const isKeyError = res.status === 401 || res.status === 403 || res.status === 402 || res.status === 429;
 
+    if (res.status === 429 && retryAttempt < 2) {
+      handleMessage({ action: 'action_start', text: `[${p}] Rate limited. Retrying in 3s...` });
+      await new Promise(resolve => setTimeout(resolve, 3000 * Math.pow(2, retryAttempt)));
+      return await executeOllamaOrCloudFetch(originalBody, p, activeModel, keyIndex, retryAttempt + 1);
+    }
+
     if (isModelError) {
       const fallbackList = (FALLBACK_MODELS[p] && FALLBACK_MODELS[p][currentStandaloneModelRole]) || [];
       const idx = fallbackList.indexOf(activeModel);
@@ -975,12 +995,12 @@ async function processStandaloneMessage(text, attachedData = null) {
         }
         showTypingIndicator(nextModel);
         
-        return await executeOllamaOrCloudFetch(originalBody, p, nextModel, keyIndex);
+        return await executeOllamaOrCloudFetch(originalBody, p, nextModel, keyIndex, 0);
       }
     } else if (isKeyError) {
       if (keyIndex + 1 < keyArray.length) {
         window.activeKeyIndexes[p] = keyIndex + 1;
-        return await executeOllamaOrCloudFetch(originalBody, p, activeModel, keyIndex + 1);
+        return await executeOllamaOrCloudFetch(originalBody, p, activeModel, keyIndex + 1, 0);
       }
     }
 
@@ -1003,7 +1023,7 @@ async function processStandaloneMessage(text, attachedData = null) {
       }
       showTypingIndicator(nextModel);
       
-      return await executeOllamaOrCloudFetch(originalBody, nextProvider, null, 0);
+      return await executeOllamaOrCloudFetch(originalBody, nextProvider, null, 0, 0);
     }
 
     // ── Everything failed ──

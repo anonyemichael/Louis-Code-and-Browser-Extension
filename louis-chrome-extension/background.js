@@ -23,6 +23,11 @@ let heartbeatTimer = null;
 let sidePanelPort = null;
 let connectionStatus = 'disconnected';
 
+// ── Slide Capture State ──
+let capturedSlides = [];
+let slideCaptureTimer = null;
+let lastSlideImageData = null;
+
 // ── Side Panel Click → Open ───────────────────────────────────────────────
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
   .catch(e => console.warn('sidePanel behavior error:', e));
@@ -64,6 +69,14 @@ function handleSidePanelMessage(msg, port) {
 
     case 'user_message':
       handleUserMessage(msg.text);
+      break;
+
+    case 'start_slide_capture':
+      handleStartSlideCapture({ from_sidepanel: true });
+      break;
+
+    case 'stop_slide_capture':
+      handleStopSlideCapture({ from_sidepanel: true });
       break;
 
     default:
@@ -281,6 +294,14 @@ function handleServerMessage(data) {
       handleMultiAction(data);
       break;
 
+    case 'start_slide_capture':
+      handleStartSlideCapture(data);
+      break;
+
+    case 'stop_slide_capture':
+      handleStopSlideCapture(data);
+      break;
+
     default:
       console.log('Unknown server action:', data);
   }
@@ -490,6 +511,159 @@ async function handleScreenshot(data) {
       success: false,
       error: e.message,
     });
+  }
+}
+
+// ── Slide Capture ─────────────────────────────────────────────────────────
+async function computeImageHash(dataUrl) {
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    // Downscale to 32x32 to get a basic pixel representation that ignores minor video compression artifacts
+    const canvas = new OffscreenCanvas(32, 32);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, 32, 32);
+    return ctx.getImageData(0, 0, 32, 32).data;
+  } catch (e) {
+    console.error('Failed to hash image:', e);
+    return null;
+  }
+}
+
+function computeImageDiff(data1, data2) {
+  if (!data1 || !data2 || data1.length !== data2.length) return 100;
+  let diff = 0;
+  for (let i = 0; i < data1.length; i += 4) {
+    // Only compare RGB, ignore Alpha
+    diff += Math.abs(data1[i] - data2[i]);
+    diff += Math.abs(data1[i+1] - data2[i+1]);
+    diff += Math.abs(data1[i+2] - data2[i+2]);
+  }
+  return (diff / (32 * 32 * 3 * 255)) * 100; // Returns percentage difference (0-100)
+}
+
+async function handleStartSlideCapture(data) {
+  if (slideCaptureTimer) {
+    const result = { success: false, error: 'Slide capture is already running.' };
+    if (data.from_sidepanel) notifySidePanel({ type: 'action_error', text: result.error });
+    else sendToServer({ action: 'action_result', original_action: 'start_slide_capture', ...result });
+    return;
+  }
+
+  capturedSlides = [];
+  lastSlideImageData = null;
+  notifySidePanel({ type: 'action_start', text: 'Starting continuous slide capture...' });
+
+  slideCaptureTimer = setInterval(async () => {
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 80 });
+      if (!dataUrl) return;
+
+      const newHashData = await computeImageHash(dataUrl);
+      if (!lastSlideImageData) {
+        // First slide
+        capturedSlides.push(dataUrl);
+        lastSlideImageData = newHashData;
+        notifySidePanel({ type: 'action_complete', text: `Captured slide 1` });
+      } else {
+        const diff = computeImageDiff(lastSlideImageData, newHashData);
+        // If image is more than 3% different, we consider it a new slide
+        if (diff > 3.0) {
+          capturedSlides.push(dataUrl);
+          lastSlideImageData = newHashData;
+          notifySidePanel({ type: 'action_complete', text: `Captured slide ${capturedSlides.length}` });
+        }
+      }
+    } catch (e) {
+      console.warn('Slide capture interval error:', e);
+    }
+  }, 5000);
+
+  const result = { success: true, data: { status: 'capturing' } };
+  if (!data.from_sidepanel) {
+    sendToServer({ action: 'action_result', original_action: 'start_slide_capture', ...result });
+  }
+}
+
+async function handleStopSlideCapture(data) {
+  if (!slideCaptureTimer) {
+    const result = { success: false, error: 'Slide capture is not running.' };
+    if (data.from_sidepanel) notifySidePanel({ type: 'action_error', text: result.error });
+    else sendToServer({ action: 'action_result', original_action: 'stop_slide_capture', ...result });
+    return;
+  }
+
+  clearInterval(slideCaptureTimer);
+  slideCaptureTimer = null;
+  lastSlideImageData = null;
+
+  if (capturedSlides.length === 0) {
+    const result = { success: true, data: { message: 'Stopped. No slides were captured.' } };
+    if (data.from_sidepanel) notifySidePanel({ type: 'action_complete', text: result.data.message });
+    else sendToServer({ action: 'action_result', original_action: 'stop_slide_capture', ...result });
+    return;
+  }
+
+  try {
+    notifySidePanel({ type: 'action_start', text: `Generating HTML with ${capturedSlides.length} slides...` });
+    
+    // Generate HTML document
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Captured Slides</title>
+  <style>
+    body { font-family: sans-serif; background: #111; color: #fff; padding: 20px; text-align: center; }
+    .slide { margin-bottom: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+    img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+    h2 { margin-bottom: 10px; color: #ddd; }
+  </style>
+</head>
+<body>
+  <h1>Captured Slides</h1>
+  <p>Total Slides: ${capturedSlides.length}</p>
+  ${capturedSlides.map((src, i) => `
+    <div class="slide">
+      <h2>Slide ${i + 1}</h2>
+      <img src="${src}">
+    </div>
+  `).join('')}
+</body>
+</html>`;
+
+    // Convert to blob and create object URL
+    const blob = new Blob([html], { type: 'text/html' });
+    
+    // Workaround for MV3 Service Workers: Since URL.createObjectURL is not available,
+    // we use a Data URL for the HTML file download instead.
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const b64Html = reader.result;
+      chrome.downloads.download({
+        url: b64Html,
+        filename: 'zoom_slides.html',
+        saveAs: true
+      }, (downloadId) => {
+        if (chrome.runtime.lastError) {
+          console.error(chrome.runtime.lastError);
+        }
+        const result = { success: true, data: { message: \`Stopped. Downloaded \${capturedSlides.length} slides as zoom_slides.html\` } };
+        if (data.from_sidepanel) notifySidePanel({ type: 'action_complete', text: result.data.message });
+        else sendToServer({ action: 'action_result', original_action: 'stop_slide_capture', ...result });
+        
+        // Clear memory
+        capturedSlides = [];
+      });
+    };
+    reader.readAsDataURL(blob);
+
+  } catch (e) {
+    const result = { success: false, error: 'Failed to save slides: ' + e.message };
+    if (data.from_sidepanel) notifySidePanel({ type: 'action_error', text: result.error });
+    else sendToServer({ action: 'action_result', original_action: 'stop_slide_capture', ...result });
   }
 }
 
