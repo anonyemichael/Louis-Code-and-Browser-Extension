@@ -522,12 +522,25 @@ def handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> str:
 
 
 def _handle_browser_tool(tool_name: str, arguments: dict[str, Any]) -> str:
-    """Forward a browser tool call to the Chrome extension via WebSocket."""
+    """Forward a browser tool call to the Chrome extension via WebSocket.
+    Auto-launches Chrome with the extension if not already running."""
     if not browser_server.is_running():
         return json.dumps({
             "status": "error",
             "message": "Browser server not running. Use /browser to start it.",
         })
+
+    # Auto-launch Chrome if no extension is connected yet
+    if browser_server._active_ws is None:
+        if _chrome_process is None or _chrome_process.poll() is not None:
+            console.print("[grey70]Launching Chrome with Louis extension...[/grey70]")
+            _launch_chrome_with_extension()
+            # Give Chrome a moment to start and connect
+            import time as _time
+            for _ in range(10):  # Wait up to 5 seconds
+                _time.sleep(0.5)
+                if browser_server._active_ws is not None:
+                    break
 
     if browser_server._active_ws is None:
         return json.dumps({
@@ -1622,7 +1635,7 @@ def interactive_session(args: argparse.Namespace) -> int:
             preview = cleaned.split("\n")[0][:120] or "(ran a tool)"
             console.print(f"[{style}]{m['role']}:[/{style}] [grey70]{preview}[/grey70]")
         console.print(Rule(style="grey50"))
-    # Auto-start browser server and launch Chrome with extension
+    # Auto-start browser server (but don't launch Chrome — it opens on demand)
     if not browser_server.is_running():
         def _browser_chat_fn(prompt: str) -> str:
             """Process browser messages through Louis AI with role-aware routing."""
@@ -1639,8 +1652,7 @@ def interactive_session(args: argparse.Namespace) -> int:
                 return f"Error: {e}"
         
         browser_server.start_server(_browser_chat_fn)
-        console.print(f"[grey70]Browser server running on ws://localhost:{browser_server.WS_PORT}[/grey70]")
-        _launch_chrome_with_extension()
+        console.print(f"[grey70]Browser server ready on ws://localhost:{browser_server.WS_PORT} (Chrome launches when needed)[/grey70]")
         console.print()
 
     while True:
