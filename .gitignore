@@ -3,3 +3,7 @@
 .louis-browser-profile/
 __pycache__/
 *.pyc
+
+*.msi
+*.zip
+*.exe
